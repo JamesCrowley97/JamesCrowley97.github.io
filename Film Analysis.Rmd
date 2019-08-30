@@ -1,0 +1,252 @@
+---
+title: "Film Analysis"
+output: github_document
+author: James Crowley
+---
+
+I have an Excel spreadsheet that contains all of the films that I have seen over the last ~2 years, as well as my ratings of all these films. Ratings reflect how much I enjoyed a film, and are given on a 0 to 5 star scale with half-stars (i.e., 0/5 stars, 0.5/5 stars, 1/5 stars, 1.5/5 stars, etc). The spreadsheet also contains other information about the films as well. Let's read the file into R.
+
+```{r}
+library(readxl) # fast excel reader
+data.raw <- read_excel("JamesCrowleyMasterCopyMovieRatingsDatabase.xlsx", col_names = TRUE)
+
+Films <- as.data.frame(data.raw)
+
+head(Films)
+
+```
+
+We can see that there are 11 columns in this data frame, including the film, the rating I gave it, its director, its runtime, and some information on the film from the popular movie website Rotten Tomatoes.
+
+Now let's restructure some of the columns in the data frame such that they're easier to reference.
+
+```{r}
+colnames(Films)[3] <- "Year_Released"
+colnames(Films)[5] <- "Director_2"
+colnames(Films)[6] <- "Director_3"
+colnames(Films)[8] <- "RT_Critic_Score"
+colnames(Films)[9] <- "RT_Critic_Reviews_Counted"
+colnames(Films)[10] <- "RT_Audience_Score"
+colnames(Films)[11] <- "RT_Number_of_Audience_Reviews"
+
+str(Films)
+```
+
+We'll also convert the Rotten Tomatoes Critic Score, Audience Score, and Audience Number of Reviews to numeric.
+
+```{r}
+Films$RT_Critic_Score <- as.numeric(Films$RT_Critic_Score)
+Films$RT_Audience_Score <- as.numeric(Films$RT_Audience_Score)
+Films$RT_Number_of_Audience_Reviews <- as.numeric(Films$RT_Number_of_Audience_Reviews)
+str(Films)
+```
+
+This all looks good, but the biggest issue is that the 'Rating' column contains the string 'X/X stars' in it. If we want to do some analysis on the ratings I give each film, we will have to clean this column up such that it contains only numeric values.
+
+```{r}
+#Correct Rating column
+Rating <- Films$Rating
+Rating <- gsub( "/5 stars", "", as.character(Rating))
+Rating <- as.numeric(Rating)
+
+Films$Rating <- Rating
+str(Films)
+
+```
+
+Looks good. The last thing we need to do to clean the dataset up involves values that are 'N/A'... NA is a special value in R, but R does not automatically read 'N/A' as NA- in fact it reads 'N/A' as a character data type. Let's change all the 'N/A' values so that R can read them correctly.
+
+```{r}
+
+library(dplyr)
+library(naniar)
+
+#Replace all occurrences of N/A in Films dataset
+Films <- Films %>% 
+  replace_with_na_all(condition = ~.x == "N/A")
+
+Films <- as.data.frame(Films)
+
+#Quick look at Films data frame
+head(Films)
+
+```
+
+Let's move on to some analysis. Say we are interested in the correlation coefficients of each numeric variable in relation to one another. For example, when 'Year_Released' increases, does 'Rating' also increase with it? Let's take a look.
+
+```{r}
+my_data <- Films[, c(2,3,7,8,9,10,11)]
+library("Hmisc")
+#Correlation matrix
+res2 <- rcorr(as.matrix(my_data))
+res2
+```
+
+We can see that the strongest correlations are 'Year_Released' and 'RT_Critic_Reviews_Counted' (0.73 r-squared), 'RT_Critic_Score and RT_Audience_Score' (0.62 r-squared), 'RT_Critic_Score' and 'Year_Released' (-0.36 r-squared), and 'RT_Audience_Score' and 'Year_Released' (-0.33 r-squared).
+
+In other words, as the release year of a film increases, there is generally a higher amount of critics that have posted reviews of the film, a lower percentage score on the Rotten Tomatoes Critic Tomatometer, and a lower percentage score on the Rotten Tomatoes Audience Tomatometer. This largely makes intuitive sense. The Critic Score and Audience Score on Rotten Tomatoes also move in moderate conjunction with one another.
+
+It's interesting that the 'Rating' column is not linearlly related with any other variable.
+
+The correlation output in R was kind of messy. Let's make it look more presentable.
+
+```{r}
+#format the correlation matrix into a table with 4 columns containing :
+#Column 1 : row names (variable 1 for the correlation test)
+#Column 2 : column names (variable 2 for the correlation test)
+#Column 3 : the correlation coefficients
+#Column 4 : the p-values of the correlations
+flattenCorrMatrix <- function(cormat, pmat) {
+  ut <- upper.tri(cormat)
+  data.frame(
+    row = rownames(cormat)[row(cormat)[ut]],
+    column = rownames(cormat)[col(cormat)[ut]],
+    cor  =(cormat)[ut],
+    p = pmat[ut]
+  )
+}
+
+flattenCorrMatrix(res2$r, res2$P)
+```
+
+We can see that all of the variable pairs that were correlated are statistically significant (p-value < 0.05).
+
+Here is a plot of the correlation matrix. In the plot, the distribution of each variable is shown
+on the diagonal. On the bottom of the diagonal is the bivariate scatter plots with a fitted line.
+On the top of the diagonal, the value of the correlation is shown, plus the significance level as stars. Each significance level is associated with a symbol (the greater the amount of stars, the lower the p-value).
+
+```{r}
+
+
+library("PerformanceAnalytics")
+
+#Chart of the correlation matrix
+chart.Correlation(my_data, histogram=TRUE, pch=19)
+```
+
+Let's move on to an analysis of the ratings I gave each movie.
+
+```{r}
+#Create some vectors that will be used in barplot
+sorted <- sort(unique(Rating))
+Rating <- factor(Films$Rating, levels = c(0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5))
+
+
+freq <- summary(Rating)
+
+
+freq <- as.numeric(as.character(freq))
+
+#Create a barplot with the distribution of ratings in my film database
+ylim <- c(0, 1.3*max(freq))
+xx <- barplot(freq, xaxt = 'n', xlab = 'Ratings', width = 1, ylim = ylim, main = "Distribution of   Ratings in Film Database", ylab = "Frequency")
+
+text(x = xx, y = freq, label = freq, pos = 3, cex = 1, col = "green", xlab = "Ratings")
+## Add x-axis labels
+axis(1, at = xx, labels = sorted, tick=FALSE, las=1, line=-0.5, cex.axis=1)
+```
+
+We can see that most of the films that I've watched have been given a positive review 
+(Rating >= 3/5 stars), as the barplot is skewed heavily to the right. I've only given 12 films a perfect rating of 5/5 stars, and only 3 films a rating of 0/5 stars.
+
+How do films match up by decade?
+
+```{r}
+#Average ratings of films by decade
+w <- Films %>%
+  mutate(Decade = cut(Year_Released,
+                      breaks = c(1909, 1919, 1929, 1939, 1949, 1959, 1969, 1979, 1989, 1999,
+                                 2009, 2019),
+                      labels=c("1910-1919", "1920-1929", "1930-1939", "1940-1949", "1950-1959",
+                               "1960-1969", "1970-1979", "1980-1989", "1990-1999", "2000-2009",
+                                "2010-2019"))) %>%
+  group_by(Decade) %>%
+  summarise(AvgRating = mean(Rating), NumberOfFilms=n()) %>% 
+  arrange(desc(AvgRating)) %>%	
+  print(n = Inf)
+
+w <- as.data.frame(w)
+w$AvgRating <- round(w$AvgRating, digits = 2)
+w
+
+```
+
+We can see that most of the films that I've watched have come in the current millenium, and that 
+the highest rated decade is 2000-2009. The '80s and '70s decades have the exact same rating 
+(3.20/5 stars), despite the fact that I've seen 8 more movies in the '70s (30 films) than 
+in the '80s (22 films).
+
+Let's look at the ratings I've given of films by different directors. Only directors whom I've seen 4 or more of their films will be counted in this analysis.
+
+```{r}
+#Average rating of films by a director
+s <- Films %>%
+  group_by(Director) %>%
+  summarise(AvgRating = mean(Rating), NumberOfFilms = n()) %>%
+  filter(NumberOfFilms >= 4) %>%
+  arrange(desc(AvgRating)) %>%	
+  print(n = Inf)
+
+s <- as.data.frame(s)
+s$AvgRating <- round(s$AvgRating, digits = 2)
+s
+```
+Some great directors on this list, and while I wouldn't say that Christopher Nolan is my favorite film director, he's definitely up there.
+
+Two of my favorite film directors appear towards the bottom of the list in Stanley Kubrick and Alfred Hitchcock (I do genuinely hate Steven Spielberg). Why are Kubrick and Hitchcock so low? Let's take a look at the distribution of ratings for the two directors.
+
+```{r}
+#Looking at distribution of Kubrick and Hitchcock films
+Kubrick <- subset(Films, Director == "Stanley Kubrick")
+
+
+Hitchcock <- subset(Films, Director == "Alfred Hitchcock")
+
+
+boxplot(Hitchcock$Rating, horizontal=TRUE, main="Alfred Hitchcock Film Ratings")
+
+boxplot(Kubrick$Rating, horizontal=TRUE, main="Stanley Kubrick Film Ratings")
+
+```
+
+
+We can see that, despite having different average ratings, both Kubrick and Hitchcock have the
+exact same median film rating of 3.00/5 stars.
+
+Let's use the raster package to look at the coefficient of variation (CV) of each director.
+
+```{r}
+
+library("raster")
+
+f <- Films %>%
+  group_by(Director) %>%
+  summarise(CoefficientOfVariation = cv(Rating),
+            NumberOfFilms = n()) %>%
+  filter(NumberOfFilms >= 4) %>%
+  arrange(desc(CoefficientOfVariation)) %>%	
+  print(n = Inf)
+```
+
+Kubrick and Hitchcock both appear in the top 5 with CV's of 40.2% and 49.6%, respectively. There is a lot of variation in the quality of their films (according to me), thus bringing their average rating down. Both have had plenty of great films that I have rated highly, but both have had at least a couple of films I've rated lowly.
+
+Lastly, let's see if there is anything interesting in relation to the runtimes of films and my 
+ratings of them.
+
+```{r}
+#Grouping by runtime
+
+
+r <- Films %>%
+  mutate(Runtime = cut(Runtime_In_Minutes,
+                      breaks = c(0, 89, 119, 150, 250),
+                      labels = c("0-89 minutes", "90-119 minutes", "120-150 minutes", "Beyond 2.5 hours"))) %>%
+           group_by(Runtime) %>%
+           summarise(AvgRating = mean(Rating), NumberOfFilms=n()) %>% 
+           arrange(desc(AvgRating)) %>%	
+           print(n = Inf)
+
+
+```
+
+Apparently, I enjoy long films, with films that were longer than 2.5 hours being given an average rating 3.49/5 stars.
